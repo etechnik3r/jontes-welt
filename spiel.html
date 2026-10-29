@@ -34,7 +34,12 @@
       color: #fff;
       touch-action: none;
     }
-    .hauen { width: 110px; height: 110px; border-radius: 50%; background: #b71c1c; font-weight: bold; font-size: 1.2rem; }
+    .hauen { width: 90px; height: 90px; border-radius: 50%; background: #b71c1c; font-weight: bold; font-size: 1.1rem; }
+    .schild { background: #1565c0; }
+    .aktionen { display: flex; gap: 12px; }
+    .stufen { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin: 12px 0; }
+    .stufen .knopf { margin: 0; }
+    .stufen .knopf.gewaehlt { outline: 4px solid #ffd84a; }
     @media (hover: hover) and (pointer: fine) { .steuerung { display: none; } }
   </style>
 </head>
@@ -52,7 +57,13 @@
 
   <main>
     <h1>Mob-Kampf</h1>
-    <p class="anleitung">Laufen: Pfeiltasten oder W A S D · Hauen: Leertaste<br>Am Handy: die Knöpfe unter dem Spiel</p>
+    <p class="anleitung">Laufen: Pfeiltasten oder W A S D · Hauen: Leertaste · Schild: E gedrückt halten<br>Am Handy: die Knöpfe unter dem Spiel</p>
+
+    <div class="stufen">
+      <button class="knopf" style="--knopf:#2e7d32" data-stufe="einfach">🟢 Einfach</button>
+      <button class="knopf" style="--knopf:#ef6c00" data-stufe="mittel">🟠 Mittel</button>
+      <button class="knopf" style="--knopf:#b71c1c" data-stufe="schwer">🔴 Schwer</button>
+    </div>
 
     <canvas id="leinwand" width="640" height="480"></canvas>
 
@@ -62,7 +73,10 @@
         <button data-richtung="links">◀</button><span></span><button data-richtung="rechts">▶</button>
         <span></span><button data-richtung="runter">▼</button><span></span>
       </div>
-      <button class="hauen" id="hauKnopf">HAUEN</button>
+      <div class="aktionen">
+        <button class="hauen schild" id="schildKnopf">SCHILD</button>
+        <button class="hauen" id="hauKnopf">HAUEN</button>
+      </div>
     </div>
   </main>
 
@@ -96,8 +110,43 @@
     });
     leinwand.addEventListener("pointerdown", () => { if (zustand !== "spielen") neuesSpiel(); });
 
+    const schildKnopf = document.getElementById("schildKnopf");
+    let schildTouch = false;
+    schildKnopf.addEventListener("pointerdown", e => { e.preventDefault(); schildTouch = true; });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(ev => schildKnopf.addEventListener(ev, () => { schildTouch = false; }));
+
+    // ---------- Schwierigkeitsstufen ----------
+    const STUFEN = {
+      einfach: { name: "Einfach", herzen: 8, tempo: 0.6, extraMobs: 1, schussPause: 200, zuender: 130, telePause: 260, schutzZeit: 90 },
+      mittel:  { name: "Mittel",  herzen: 6, tempo: 0.8, extraMobs: 2, schussPause: 150, zuender: 110, telePause: 200, schutzZeit: 75 },
+      schwer:  { name: "Schwer",  herzen: 5, tempo: 1.0, extraMobs: 2, schussPause: 120, zuender: 90,  telePause: 150, schutzZeit: 60 }
+    };
+    let stufe = STUFEN.einfach;
+    document.querySelectorAll("[data-stufe]").forEach(k => {
+      k.addEventListener("click", () => {
+        stufe = STUFEN[k.dataset.stufe];
+        document.querySelectorAll("[data-stufe]").forEach(x => x.classList.toggle("gewaehlt", x === k));
+        neuesSpiel();
+        k.blur();
+      });
+    });
+    document.querySelector('[data-stufe="einfach"]').classList.add("gewaehlt");
+
     // ---------- Spielzustand ----------
     let zustand = "start", spieler, mobs, pfeile, effekte, welle, punkte, bild;
+
+    function schildOben() {
+      return zustand === "spielen" && (tasten["e"] || schildTouch);
+    }
+
+    // Hält das Schild in die Richtung, aus der der Angriff kommt?
+    function schildBlockt(vonX, vonY) {
+      if (!schildOben()) return false;
+      const w = Math.atan2(vonY - spieler.y, vonX - spieler.x);
+      let diff = Math.abs(w - spieler.richtung);
+      if (diff > Math.PI) diff = Math.PI * 2 - diff;
+      return diff < Math.PI * 0.45;
+    }
 
     const MOBARTEN = {
       zombie:   { zeichen: "🧟", leben: 2, tempo: 1.0, schaden: 1, punkte: 10 },
@@ -107,7 +156,7 @@
     };
 
     function neuesSpiel() {
-      spieler = { x: B / 2, y: H / 2, herzen: 5, unverwundbar: 0, schlag: 0, abklingen: 0, blick: 1 };
+      spieler = { x: B / 2, y: H / 2, herzen: stufe.herzen, unverwundbar: 0, schlag: 0, abklingen: 0, blick: 1, richtung: 0 };
       mobs = []; pfeile = []; effekte = [];
       welle = 0; punkte = 0; bild = 0;
       zustand = "spielen";
@@ -120,7 +169,7 @@
       if (welle >= 2) arten.push("creeper");
       if (welle >= 3) arten.push("skelett");
       if (welle >= 4) arten.push("enderman");
-      const anzahl = welle + 2;
+      const anzahl = welle + stufe.extraMobs;
       for (let i = 0; i < anzahl; i++) {
         mobErzeugen(arten[Math.floor(Math.random() * arten.length)]);
       }
@@ -136,13 +185,13 @@
       else if (seite === 2) { x = Math.random() * B; y = H + 20; }
       else { x = -20; y = Math.random() * H; }
       const v = MOBARTEN[art];
-      mobs.push({ art, x, y, leben: v.leben, blitz: 0, zuender: 0, schussZeit: 60 + Math.random() * 60, teleZeit: 120 + Math.random() * 120 });
+      mobs.push({ art, x, y, leben: v.leben, blitz: 0, zuender: 0, schussZeit: stufe.schussPause / 2 + Math.random() * 60, teleZeit: stufe.telePause + Math.random() * 120 });
     }
 
     function abstand(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 
     function hauen() {
-      if (zustand !== "spielen" || spieler.abklingen > 0) return;
+      if (zustand !== "spielen" || spieler.abklingen > 0 || schildOben()) return;
       spieler.schlag = 10;
       spieler.abklingen = 22;
       for (const m of mobs) {
@@ -157,11 +206,18 @@
       }
     }
 
-    function verletzen(menge) {
-      if (spieler.unverwundbar > 0) return;
+    // Gibt true zurück, wenn das Schild den Angriff abgewehrt hat
+    function verletzen(menge, vonX, vonY) {
+      if (spieler.unverwundbar > 0) return false;
+      if (vonX !== undefined && schildBlockt(vonX, vonY)) {
+        effekte.push({ text: "Geblockt!", x: spieler.x, y: spieler.y - 30, zeit: 30, groesse: 18 });
+        spieler.unverwundbar = 20;
+        return true;
+      }
       spieler.herzen -= menge;
-      spieler.unverwundbar = 60;
+      spieler.unverwundbar = stufe.schutzZeit;
       if (spieler.herzen <= 0) { spieler.herzen = 0; zustand = "ende"; }
+      return false;
     }
 
     // ---------- Spiel-Logik ----------
@@ -175,9 +231,11 @@
       if (tasten["arrowdown"] || tasten["s"] || touch.runter) dy++;
       if (dx || dy) {
         const l = Math.hypot(dx, dy);
-        spieler.x += dx / l * 3;
-        spieler.y += dy / l * 3;
+        const schritt = schildOben() ? 1.6 : 3;
+        spieler.x += dx / l * schritt;
+        spieler.y += dy / l * schritt;
         if (dx) spieler.blick = dx;
+        spieler.richtung = Math.atan2(dy, dx);
       }
       spieler.x = Math.max(18, Math.min(B - 18, spieler.x));
       spieler.y = Math.max(18, Math.min(H - 18, spieler.y));
@@ -188,6 +246,7 @@
       // Mobs
       for (const m of mobs) {
         const v = MOBARTEN[m.art];
+        const tempo = v.tempo * stufe.tempo;
         const d = abstand(m, spieler);
         const w = Math.atan2(spieler.y - m.y, spieler.x - m.x);
         if (m.blitz > 0) m.blitz--;
@@ -195,7 +254,7 @@
         if (m.art === "creeper") {
           if (m.zuender > 0) {
             m.zuender++;
-            if (m.zuender > 90) {
+            if (m.zuender > stufe.zuender) {
               explosion(m);
               m.leben = -99;
             }
@@ -203,21 +262,21 @@
             m.zuender = 1;
             creeperZischen();
           } else {
-            m.x += Math.cos(w) * v.tempo; m.y += Math.sin(w) * v.tempo;
+            m.x += Math.cos(w) * tempo; m.y += Math.sin(w) * tempo;
           }
         } else if (m.art === "skelett") {
           // Abstand halten und schießen
-          if (d > 220) { m.x += Math.cos(w) * v.tempo; m.y += Math.sin(w) * v.tempo; }
-          else if (d < 150) { m.x -= Math.cos(w) * v.tempo; m.y -= Math.sin(w) * v.tempo; }
+          if (d > 220) { m.x += Math.cos(w) * tempo; m.y += Math.sin(w) * tempo; }
+          else if (d < 150) { m.x -= Math.cos(w) * tempo; m.y -= Math.sin(w) * tempo; }
           m.x = Math.max(10, Math.min(B - 10, m.x));
           m.y = Math.max(10, Math.min(H - 10, m.y));
           m.schussZeit--;
           if (m.schussZeit <= 0 && d < 400) {
             pfeile.push({ x: m.x, y: m.y, vx: Math.cos(w) * 4, vy: Math.sin(w) * 4, zeit: 160 });
-            m.schussZeit = 120;
+            m.schussZeit = stufe.schussPause;
           }
         } else {
-          m.x += Math.cos(w) * v.tempo; m.y += Math.sin(w) * v.tempo;
+          m.x += Math.cos(w) * tempo; m.y += Math.sin(w) * tempo;
           if (m.art === "enderman") {
             m.teleZeit--;
             if (m.teleZeit <= 0) {
@@ -227,12 +286,17 @@
               m.y = Math.max(20, Math.min(H - 20, spieler.y + Math.sin(ww) * 150));
               effekte.push({ funken: true, x: m.x, y: m.y, zeit: 25 });
               endermanGeraeusch();
-              m.teleZeit = 150 + Math.random() * 120;
+              m.teleZeit = stufe.telePause + Math.random() * 120;
             }
           }
         }
 
-        if (m.art !== "creeper" && d < 30) verletzen(v.schaden);
+        if (m.art !== "creeper" && d < 30) {
+          if (verletzen(v.schaden, m.x, m.y)) {
+            // vom Schild zurückgeschubst
+            m.x -= Math.cos(w) * 35; m.y -= Math.sin(w) * 35;
+          }
+        }
       }
 
       // besiegte Mobs
@@ -247,7 +311,7 @@
       // Pfeile
       for (const p of pfeile) {
         p.x += p.vx; p.y += p.vy; p.zeit--;
-        if (abstand(p, spieler) < 18) { verletzen(1); p.zeit = 0; }
+        if (abstand(p, spieler) < 18) { verletzen(1, p.x - p.vx * 5, p.y - p.vy * 5); p.zeit = 0; }
       }
       pfeile = pfeile.filter(p => p.zeit > 0);
 
@@ -259,7 +323,7 @@
 
     function explosion(m) {
       effekte.push({ boom: true, x: m.x, y: m.y, zeit: 30 });
-      if (abstand(m, spieler) < 90) verletzen(MOBARTEN.creeper.schaden);
+      if (abstand(m, spieler) < 90) verletzen(MOBARTEN.creeper.schaden, m.x, m.y);
     }
 
     // Kurzes Zischen, damit man gewarnt ist
@@ -325,6 +389,16 @@
       if (!(spieler.unverwundbar > 0 && Math.floor(spieler.unverwundbar / 5) % 2 === 0)) {
         zeichneEmoji("🧑", spieler.x, spieler.y, 34);
       }
+      if (schildOben()) {
+        const sx = spieler.x + Math.cos(spieler.richtung) * 26;
+        const sy = spieler.y + Math.sin(spieler.richtung) * 26;
+        g.fillStyle = "rgba(100,180,255,0.25)";
+        g.beginPath();
+        g.moveTo(spieler.x, spieler.y);
+        g.arc(spieler.x, spieler.y, 46, spieler.richtung - Math.PI * 0.45, spieler.richtung + Math.PI * 0.45);
+        g.closePath(); g.fill();
+        zeichneEmoji("🛡️", sx, sy, 28);
+      }
       if (spieler.schlag > 0) {
         g.strokeStyle = "rgba(255,255,255,0.8)"; g.lineWidth = 5;
         g.beginPath();
@@ -354,12 +428,12 @@
       // Anzeige oben
       g.font = "22px serif"; g.textAlign = "left"; g.textBaseline = "top";
       let herzen = "";
-      for (let i = 0; i < 5; i++) herzen += i < spieler.herzen ? "❤️" : "🖤";
+      for (let i = 0; i < stufe.herzen; i++) herzen += i < spieler.herzen ? "❤️" : "🖤";
       g.fillText(herzen, 10, 8);
       g.font = "bold 20px Trebuchet MS, sans-serif";
       g.textAlign = "right"; g.fillStyle = "#fff";
       g.strokeStyle = "#000"; g.lineWidth = 4;
-      const info = "Welle " + welle + "   ⭐ " + punkte;
+      const info = stufe.name + " · Welle " + welle + " · " + punkte + " Punkte";
       g.strokeText(info, B - 10, 10); g.fillText(info, B - 10, 10);
     }
 
@@ -369,10 +443,10 @@
       g.fillStyle = "#ffd84a";
       g.font = "bold 44px Trebuchet MS, sans-serif";
       g.textAlign = "center"; g.textBaseline = "middle";
-      g.fillText(titel, B / 2, H / 2 - 70);
+      g.fillText(titel, B / 2, H / 2 - 90);
       g.fillStyle = "#fff";
       g.font = "22px Trebuchet MS, sans-serif";
-      zeilen.forEach((z, i) => g.fillText(z, B / 2, H / 2 - 10 + i * 34));
+      zeilen.forEach((z, i) => g.fillText(z, B / 2, H / 2 - 35 + i * 32));
     }
 
     function schleife() {
@@ -386,13 +460,14 @@
           "💣 Creeper zischen und explodieren",
           "💀 Skelette schießen Pfeile",
           "👁️ Endermen teleportieren sich",
-          "Enter drücken oder tippen zum Starten"
+          "🛡️ Mit dem Schild (E) wehrst du Angriffe von vorne ab",
+          "Stufe oben wählen oder Enter drücken (" + stufe.name + ")"
         ]);
       } else {
         zeichnen();
         bildschirm("Besiegt!", [
           "Du hast Welle " + welle + " geschafft",
-          "⭐ " + punkte + " Punkte",
+          "⭐ " + punkte + " Punkte (" + stufe.name + ")",
           "",
           "Enter drücken oder tippen für ein neues Spiel"
         ]);
