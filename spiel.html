@@ -57,12 +57,17 @@
 
   <main>
     <h1>Mob-Kampf</h1>
-    <p class="anleitung">Laufen: Pfeiltasten oder W A S D · Hauen: Leertaste · Schild: E gedrückt halten<br>Am Handy: die Knöpfe unter dem Spiel</p>
+    <p class="anleitung">Laufen: Pfeiltasten oder W A S D · Hauen: Leertaste · Schild: E gedrückt halten · Stufe und Welt kannst du unten aussuchen<br>Am Handy: die Knöpfe unter dem Spiel</p>
 
     <div class="stufen">
       <button class="knopf" style="--knopf:#2e7d32" data-stufe="einfach">🟢 Einfach</button>
       <button class="knopf" style="--knopf:#ef6c00" data-stufe="mittel">🟠 Mittel</button>
       <button class="knopf" style="--knopf:#b71c1c" data-stufe="schwer">🔴 Schwer</button>
+    </div>
+    <div class="stufen">
+      <button class="knopf" style="--knopf:#558b2f" data-welt="gras">🌱 Grasland</button>
+      <button class="knopf" style="--knopf:#555555" data-welt="hoehle">⛏️ Höhle</button>
+      <button class="knopf" style="--knopf:#1b5e20" data-welt="wald">🌲 Wald</button>
     </div>
 
     <canvas id="leinwand" width="640" height="480"></canvas>
@@ -117,9 +122,9 @@
 
     // ---------- Schwierigkeitsstufen ----------
     const STUFEN = {
-      einfach: { name: "Einfach", herzen: 8, tempo: 0.6, extraMobs: 1, schussPause: 200, zuender: 130, telePause: 260, schutzZeit: 90 },
-      mittel:  { name: "Mittel",  herzen: 6, tempo: 0.8, extraMobs: 2, schussPause: 150, zuender: 110, telePause: 200, schutzZeit: 75 },
-      schwer:  { name: "Schwer",  herzen: 5, tempo: 1.0, extraMobs: 2, schussPause: 120, zuender: 90,  telePause: 150, schutzZeit: 60 }
+      einfach: { name: "Einfach", herzen: 8, tempo: 0.6, extraMobs: 1, schussPause: 200, zuender: 130, telePause: 420, schutzZeit: 90, pfeilTempo: 2 },
+      mittel:  { name: "Mittel",  herzen: 6, tempo: 0.8, extraMobs: 2, schussPause: 150, zuender: 110, telePause: 340, schutzZeit: 75, pfeilTempo: 2.8 },
+      schwer:  { name: "Schwer",  herzen: 5, tempo: 1.0, extraMobs: 2, schussPause: 120, zuender: 90,  telePause: 260, schutzZeit: 60, pfeilTempo: 3.5 }
     };
     let stufe = STUFEN.einfach;
     document.querySelectorAll("[data-stufe]").forEach(k => {
@@ -131,6 +136,27 @@
       });
     });
     document.querySelector('[data-stufe="einfach"]').classList.add("gewaehlt");
+
+    // ---------- Welten ----------
+    let welt = "gras";
+    document.querySelectorAll("[data-welt]").forEach(k => {
+      k.addEventListener("click", () => {
+        welt = k.dataset.welt;
+        document.querySelectorAll("[data-welt]").forEach(x => x.classList.toggle("gewaehlt", x === k));
+        neuesSpiel();
+        k.blur();
+      });
+    });
+    document.querySelector('[data-welt="gras"]').classList.add("gewaehlt");
+
+    // Feste Bäume und Erze, damit sie nicht flackern
+    const baeume = [], erze = [];
+    for (let i = 0; i < 14; i++) baeume.push({ x: 20 + Math.random() * 600, y: 30 + Math.random() * 430 });
+    for (let i = 0; i < 25; i++) erze.push({
+      x: Math.floor(Math.random() * 20) * 32,
+      y: Math.floor(Math.random() * 15) * 32,
+      farbe: ["#e0e0e0", "#d4a373", "#4dd0e1", "#222222"][Math.floor(Math.random() * 4)]
+    });
 
     // ---------- Spielzustand ----------
     let zustand = "start", spieler, mobs, pfeile, effekte, welle, punkte, bild;
@@ -152,7 +178,7 @@
       zombie:   { zeichen: "🧟", leben: 2, tempo: 1.0, schaden: 1, punkte: 10 },
       creeper:  { zeichen: "💣", leben: 2, tempo: 1.2, schaden: 2, punkte: 20 },
       skelett:  { zeichen: "💀", leben: 2, tempo: 1.1, schaden: 1, punkte: 20 },
-      enderman: { zeichen: "👁️", leben: 4, tempo: 1.6, schaden: 2, punkte: 40 }
+      enderman: { zeichen: "👁️", leben: 3, tempo: 1.1, schaden: 1, punkte: 40 }
     };
 
     function neuesSpiel() {
@@ -272,7 +298,7 @@
           m.y = Math.max(10, Math.min(H - 10, m.y));
           m.schussZeit--;
           if (m.schussZeit <= 0 && d < 400) {
-            pfeile.push({ x: m.x, y: m.y, vx: Math.cos(w) * 4, vy: Math.sin(w) * 4, zeit: 160 });
+            pfeile.push({ x: m.x, y: m.y, vx: Math.cos(w) * stufe.pfeilTempo, vy: Math.sin(w) * stufe.pfeilTempo, zeit: 400 });
             m.schussZeit = stufe.schussPause;
           }
         } else {
@@ -346,11 +372,35 @@
     // ---------- Zeichnen ----------
     function zeichneBoden() {
       const k = 32;
+      const farben = {
+        gras:   ["#5b8c32", "#538029"],
+        hoehle: ["#4a4a4a", "#3f3f3f"],
+        wald:   ["#3f6e24", "#37611f"]
+      }[welt];
       for (let y = 0; y < H; y += k) {
         for (let x = 0; x < B; x += k) {
-          g.fillStyle = ((x / k + y / k) % 2 === 0) ? "#5b8c32" : "#538029";
+          g.fillStyle = ((x / k + y / k) % 2 === 0) ? farben[0] : farben[1];
           g.fillRect(x, y, k, k);
         }
+      }
+      if (welt === "hoehle") {
+        erze.forEach(e => {
+          g.fillStyle = e.farbe;
+          g.fillRect(e.x + 8, e.y + 8, 6, 6);
+          g.fillRect(e.x + 18, e.y + 16, 6, 6);
+        });
+        g.fillStyle = "rgba(0,0,0,0.3)";
+        g.fillRect(0, 0, B, H);
+      }
+      if (welt === "wald") {
+        baeume.forEach(b => {
+          g.fillStyle = "#6b4423";
+          g.fillRect(b.x - 5, b.y, 10, 18);
+          g.fillStyle = "#2e7d32";
+          g.fillRect(b.x - 18, b.y - 26, 36, 28);
+          g.fillStyle = "#1b5e20";
+          g.fillRect(b.x - 10, b.y - 20, 8, 8);
+        });
       }
     }
 
@@ -397,7 +447,19 @@
         g.moveTo(spieler.x, spieler.y);
         g.arc(spieler.x, spieler.y, 46, spieler.richtung - Math.PI * 0.45, spieler.richtung + Math.PI * 0.45);
         g.closePath(); g.fill();
-        zeichneEmoji("🛡️", sx, sy, 28);
+        g.save();
+        g.translate(sx, sy);
+        g.rotate(spieler.richtung);
+        g.fillStyle = "#8a8a8a";            // Eisenrand
+        g.fillRect(-7, -18, 14, 36);
+        g.fillStyle = "#9c6b3c";            // Holzbretter
+        g.fillRect(-5, -16, 10, 32);
+        g.fillStyle = "#7a5230";            // Fugen
+        g.fillRect(-5, -6, 10, 2);
+        g.fillRect(-5, 5, 10, 2);
+        g.fillStyle = "#c0c0c0";            // Eisenknopf
+        g.fillRect(-3, -3, 6, 6);
+        g.restore();
       }
       if (spieler.schlag > 0) {
         g.strokeStyle = "rgba(255,255,255,0.8)"; g.lineWidth = 5;
@@ -426,6 +488,7 @@
       }
 
       // Anzeige oben
+      g.fillStyle = "#fff";
       g.font = "22px serif"; g.textAlign = "left"; g.textBaseline = "top";
       let herzen = "";
       for (let i = 0; i < stufe.herzen; i++) herzen += i < spieler.herzen ? "❤️" : "🖤";
@@ -461,7 +524,7 @@
           "💀 Skelette schießen Pfeile",
           "👁️ Endermen teleportieren sich",
           "🛡️ Mit dem Schild (E) wehrst du Angriffe von vorne ab",
-          "Stufe oben wählen oder Enter drücken (" + stufe.name + ")"
+          "Stufe und Welt oben wählen oder Enter drücken"
         ]);
       } else {
         zeichnen();
