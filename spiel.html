@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Mob-Kampf</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { --hintergrund-oben: #142a14; --hintergrund-unten: #060f06; }
+    canvas {
+      display: block;
+      width: 100%;
+      max-width: 640px;
+      margin: 0 auto;
+      border: 4px solid #000;
+      image-rendering: pixelated;
+      touch-action: none;
+    }
+    .anleitung { text-align: center; margin: 10px 0; }
+    .steuerung {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: 640px;
+      margin: 14px auto 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .kreuz { display: grid; grid-template-columns: repeat(3, 60px); grid-template-rows: repeat(3, 60px); gap: 4px; }
+    .kreuz button, .hauen {
+      font-size: 1.6rem;
+      border: 3px solid #000;
+      background: #555;
+      color: #fff;
+      touch-action: none;
+    }
+    .hauen { width: 110px; height: 110px; border-radius: 50%; background: #b71c1c; font-weight: bold; font-size: 1.2rem; }
+    @media (hover: hover) and (pointer: fine) { .steuerung { display: none; } }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="index.html">Start</a>
+    <a href="zombie.html">Zombies</a>
+    <a href="creeper.html">Creeper</a>
+    <a href="skelett.html">Skelette</a>
+    <a href="enderman.html">Endermen</a>
+    <a href="quiz.html">Quiz</a>
+    <a href="spiel.html" class="aktiv">Spiel</a>
+  </nav>
+  <div class="boden"></div>
+
+  <main>
+    <h1>Mob-Kampf</h1>
+    <p class="anleitung">Laufen: Pfeiltasten oder W A S D · Hauen: Leertaste<br>Am Handy: die Knöpfe unter dem Spiel</p>
+
+    <canvas id="leinwand" width="640" height="480"></canvas>
+
+    <div class="steuerung">
+      <div class="kreuz">
+        <span></span><button data-richtung="hoch">▲</button><span></span>
+        <button data-richtung="links">◀</button><span></span><button data-richtung="rechts">▶</button>
+        <span></span><button data-richtung="runter">▼</button><span></span>
+      </div>
+      <button class="hauen" id="hauKnopf">HAUEN</button>
+    </div>
+  </main>
+
+  <footer>Gebaut von Jonte mit Hilfe von Papa und Claude. Minecraft gehört Mojang, das hier ist eine Fan-Seite.</footer>
+
+  <script src="geraeusche.js"></script>
+  <script>
+    const leinwand = document.getElementById("leinwand");
+    const g = leinwand.getContext("2d");
+    const B = leinwand.width, H = leinwand.height;
+
+    // ---------- Eingabe ----------
+    const tasten = {};
+    addEventListener("keydown", e => {
+      tasten[e.key.toLowerCase()] = true;
+      if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(e.key.toLowerCase())) e.preventDefault();
+      if (e.key === " ") hauen();
+      if (e.key === "Enter" && zustand !== "spielen") neuesSpiel();
+    });
+    addEventListener("keyup", e => { tasten[e.key.toLowerCase()] = false; });
+
+    const touch = { hoch: false, runter: false, links: false, rechts: false };
+    document.querySelectorAll("[data-richtung]").forEach(k => {
+      const r = k.dataset.richtung;
+      k.addEventListener("pointerdown", e => { e.preventDefault(); touch[r] = true; });
+      ["pointerup", "pointerleave", "pointercancel"].forEach(ev => k.addEventListener(ev, () => { touch[r] = false; }));
+    });
+    document.getElementById("hauKnopf").addEventListener("pointerdown", e => {
+      e.preventDefault();
+      if (zustand !== "spielen") neuesSpiel(); else hauen();
+    });
+    leinwand.addEventListener("pointerdown", () => { if (zustand !== "spielen") neuesSpiel(); });
+
+    // ---------- Spielzustand ----------
+    let zustand = "start", spieler, mobs, pfeile, effekte, welle, punkte, bild;
+
+    const MOBARTEN = {
+      zombie:   { zeichen: "🧟", leben: 2, tempo: 1.0, schaden: 1, punkte: 10 },
+      creeper:  { zeichen: "💣", leben: 2, tempo: 1.2, schaden: 2, punkte: 20 },
+      skelett:  { zeichen: "💀", leben: 2, tempo: 1.1, schaden: 1, punkte: 20 },
+      enderman: { zeichen: "👁️", leben: 4, tempo: 1.6, schaden: 2, punkte: 40 }
+    };
+
+    function neuesSpiel() {
+      spieler = { x: B / 2, y: H / 2, herzen: 5, unverwundbar: 0, schlag: 0, abklingen: 0, blick: 1 };
+      mobs = []; pfeile = []; effekte = [];
+      welle = 0; punkte = 0; bild = 0;
+      zustand = "spielen";
+      naechsteWelle();
+    }
+
+    function naechsteWelle() {
+      welle++;
+      const arten = ["zombie"];
+      if (welle >= 2) arten.push("creeper");
+      if (welle >= 3) arten.push("skelett");
+      if (welle >= 4) arten.push("enderman");
+      const anzahl = welle + 2;
+      for (let i = 0; i < anzahl; i++) {
+        mobErzeugen(arten[Math.floor(Math.random() * arten.length)]);
+      }
+      effekte.push({ text: "Welle " + welle + "!", x: B / 2, y: H / 2 - 40, zeit: 90, groesse: 40 });
+    }
+
+    function mobErzeugen(art) {
+      // am Rand auftauchen
+      const seite = Math.floor(Math.random() * 4);
+      let x, y;
+      if (seite === 0) { x = Math.random() * B; y = -20; }
+      else if (seite === 1) { x = B + 20; y = Math.random() * H; }
+      else if (seite === 2) { x = Math.random() * B; y = H + 20; }
+      else { x = -20; y = Math.random() * H; }
+      const v = MOBARTEN[art];
+      mobs.push({ art, x, y, leben: v.leben, blitz: 0, zuender: 0, schussZeit: 60 + Math.random() * 60, teleZeit: 120 + Math.random() * 120 });
+    }
+
+    function abstand(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+    function hauen() {
+      if (zustand !== "spielen" || spieler.abklingen > 0) return;
+      spieler.schlag = 10;
+      spieler.abklingen = 22;
+      for (const m of mobs) {
+        if (abstand(m, spieler) < 62) {
+          m.leben--;
+          m.blitz = 10;
+          m.zuender = 0; // Creeper hört auf zu zischen
+          const w = Math.atan2(m.y - spieler.y, m.x - spieler.x);
+          m.x += Math.cos(w) * 40;
+          m.y += Math.sin(w) * 40;
+        }
+      }
+    }
+
+    function verletzen(menge) {
+      if (spieler.unverwundbar > 0) return;
+      spieler.herzen -= menge;
+      spieler.unverwundbar = 60;
+      if (spieler.herzen <= 0) { spieler.herzen = 0; zustand = "ende"; }
+    }
+
+    // ---------- Spiel-Logik ----------
+    function aktualisieren() {
+      bild++;
+      // Spieler bewegen
+      let dx = 0, dy = 0;
+      if (tasten["arrowleft"] || tasten["a"] || touch.links) dx--;
+      if (tasten["arrowright"] || tasten["d"] || touch.rechts) dx++;
+      if (tasten["arrowup"] || tasten["w"] || touch.hoch) dy--;
+      if (tasten["arrowdown"] || tasten["s"] || touch.runter) dy++;
+      if (dx || dy) {
+        const l = Math.hypot(dx, dy);
+        spieler.x += dx / l * 3;
+        spieler.y += dy / l * 3;
+        if (dx) spieler.blick = dx;
+      }
+      spieler.x = Math.max(18, Math.min(B - 18, spieler.x));
+      spieler.y = Math.max(18, Math.min(H - 18, spieler.y));
+      if (spieler.unverwundbar > 0) spieler.unverwundbar--;
+      if (spieler.schlag > 0) spieler.schlag--;
+      if (spieler.abklingen > 0) spieler.abklingen--;
+
+      // Mobs
+      for (const m of mobs) {
+        const v = MOBARTEN[m.art];
+        const d = abstand(m, spieler);
+        const w = Math.atan2(spieler.y - m.y, spieler.x - m.x);
+        if (m.blitz > 0) m.blitz--;
+
+        if (m.art === "creeper") {
+          if (m.zuender > 0) {
+            m.zuender++;
+            if (m.zuender > 90) {
+              explosion(m);
+              m.leben = -99;
+            }
+          } else if (d < 55) {
+            m.zuender = 1;
+            creeperZischen();
+          } else {
+            m.x += Math.cos(w) * v.tempo; m.y += Math.sin(w) * v.tempo;
+          }
+        } else if (m.art === "skelett") {
+          // Abstand halten und schießen
+          if (d > 220) { m.x += Math.cos(w) * v.tempo; m.y += Math.sin(w) * v.tempo; }
+          else if (d < 150) { m.x -= Math.cos(w) * v.tempo; m.y -= Math.sin(w) * v.tempo; }
+          m.x = Math.max(10, Math.min(B - 10, m.x));
+          m.y = Math.max(10, Math.min(H - 10, m.y));
+          m.schussZeit--;
+          if (m.schussZeit <= 0 && d < 400) {
+            pfeile.push({ x: m.x, y: m.y, vx: Math.cos(w) * 4, vy: Math.sin(w) * 4, zeit: 160 });
+            m.schussZeit = 120;
+          }
+        } else {
+          m.x += Math.cos(w) * v.tempo; m.y += Math.sin(w) * v.tempo;
+          if (m.art === "enderman") {
+            m.teleZeit--;
+            if (m.teleZeit <= 0) {
+              effekte.push({ funken: true, x: m.x, y: m.y, zeit: 25 });
+              const ww = Math.random() * Math.PI * 2;
+              m.x = Math.max(20, Math.min(B - 20, spieler.x + Math.cos(ww) * 150));
+              m.y = Math.max(20, Math.min(H - 20, spieler.y + Math.sin(ww) * 150));
+              effekte.push({ funken: true, x: m.x, y: m.y, zeit: 25 });
+              endermanGeraeusch();
+              m.teleZeit = 150 + Math.random() * 120;
+            }
+          }
+        }
+
+        if (m.art !== "creeper" && d < 30) verletzen(v.schaden);
+      }
+
+      // besiegte Mobs
+      for (const m of mobs) {
+        if (m.leben <= 0 && m.leben > -99) {
+          punkte += MOBARTEN[m.art].punkte;
+          effekte.push({ text: "+" + MOBARTEN[m.art].punkte, x: m.x, y: m.y, zeit: 40, groesse: 22 });
+        }
+      }
+      mobs = mobs.filter(m => m.leben > 0);
+
+      // Pfeile
+      for (const p of pfeile) {
+        p.x += p.vx; p.y += p.vy; p.zeit--;
+        if (abstand(p, spieler) < 18) { verletzen(1); p.zeit = 0; }
+      }
+      pfeile = pfeile.filter(p => p.zeit > 0);
+
+      effekte.forEach(e => e.zeit--);
+      effekte = effekte.filter(e => e.zeit > 0);
+
+      if (zustand === "spielen" && mobs.length === 0) naechsteWelle();
+    }
+
+    function explosion(m) {
+      effekte.push({ boom: true, x: m.x, y: m.y, zeit: 30 });
+      if (abstand(m, spieler) < 90) verletzen(MOBARTEN.creeper.schaden);
+    }
+
+    // Kurzes Zischen, damit man gewarnt ist
+    function creeperZischen() {
+      try {
+        const a = audio();
+        const t = a.currentTime;
+        const z = rauschen(1.4);
+        const f = a.createBiquadFilter();
+        f.type = "highpass"; f.frequency.value = 3000;
+        const l = a.createGain();
+        l.gain.setValueAtTime(0.05, t);
+        l.gain.linearRampToValueAtTime(0.25, t + 1.4);
+        l.gain.setValueAtTime(0, t + 1.45);
+        z.connect(f).connect(l).connect(a.destination);
+        z.start(t);
+      } catch (e) {}
+    }
+
+    // ---------- Zeichnen ----------
+    function zeichneBoden() {
+      const k = 32;
+      for (let y = 0; y < H; y += k) {
+        for (let x = 0; x < B; x += k) {
+          g.fillStyle = ((x / k + y / k) % 2 === 0) ? "#5b8c32" : "#538029";
+          g.fillRect(x, y, k, k);
+        }
+      }
+    }
+
+    function zeichneEmoji(zeichen, x, y, groesse) {
+      g.font = groesse + "px serif";
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.fillText(zeichen, x, y);
+    }
+
+    function zeichnen() {
+      zeichneBoden();
+
+      // Mobs
+      for (const m of mobs) {
+        g.save();
+        if (m.blitz > 0) g.globalAlpha = 0.5;
+        if (m.art === "creeper" && m.zuender > 0 && Math.floor(m.zuender / 6) % 2 === 0) {
+          g.fillStyle = "rgba(255,255,255,0.7)";
+          g.beginPath(); g.arc(m.x, m.y, 22, 0, Math.PI * 2); g.fill();
+        }
+        zeichneEmoji(MOBARTEN[m.art].zeichen, m.x, m.y, 34);
+        g.restore();
+      }
+
+      // Pfeile
+      g.strokeStyle = "#3e2723"; g.lineWidth = 3;
+      for (const p of pfeile) {
+        g.beginPath();
+        g.moveTo(p.x, p.y);
+        g.lineTo(p.x - p.vx * 3, p.y - p.vy * 3);
+        g.stroke();
+      }
+
+      // Spieler
+      if (!(spieler.unverwundbar > 0 && Math.floor(spieler.unverwundbar / 5) % 2 === 0)) {
+        zeichneEmoji("🧑", spieler.x, spieler.y, 34);
+      }
+      if (spieler.schlag > 0) {
+        g.strokeStyle = "rgba(255,255,255,0.8)"; g.lineWidth = 5;
+        g.beginPath();
+        g.arc(spieler.x, spieler.y, 50, 0, Math.PI * 2);
+        g.stroke();
+        zeichneEmoji("🗡️", spieler.x + spieler.blick * 28, spieler.y - 6, 26);
+      }
+
+      // Effekte
+      for (const e of effekte) {
+        if (e.boom) {
+          g.fillStyle = "rgba(255," + (120 + e.zeit * 4) + ",0," + (e.zeit / 30) + ")";
+          g.beginPath(); g.arc(e.x, e.y, 90 - e.zeit * 2, 0, Math.PI * 2); g.fill();
+        } else if (e.funken) {
+          g.fillStyle = "rgba(170,60,255," + (e.zeit / 25) + ")";
+          for (let i = 0; i < 6; i++) g.fillRect(e.x + Math.sin(i * 7 + e.zeit) * 20, e.y + Math.cos(i * 5 + e.zeit) * 20, 5, 5);
+        } else {
+          g.fillStyle = "#fff";
+          g.font = "bold " + e.groesse + "px Trebuchet MS, sans-serif";
+          g.textAlign = "center";
+          g.strokeStyle = "#000"; g.lineWidth = 4;
+          g.strokeText(e.text, e.x, e.y - (40 - e.zeit) * 0.3);
+          g.fillText(e.text, e.x, e.y - (40 - e.zeit) * 0.3);
+        }
+      }
+
+      // Anzeige oben
+      g.font = "22px serif"; g.textAlign = "left"; g.textBaseline = "top";
+      let herzen = "";
+      for (let i = 0; i < 5; i++) herzen += i < spieler.herzen ? "❤️" : "🖤";
+      g.fillText(herzen, 10, 8);
+      g.font = "bold 20px Trebuchet MS, sans-serif";
+      g.textAlign = "right"; g.fillStyle = "#fff";
+      g.strokeStyle = "#000"; g.lineWidth = 4;
+      const info = "Welle " + welle + "   ⭐ " + punkte;
+      g.strokeText(info, B - 10, 10); g.fillText(info, B - 10, 10);
+    }
+
+    function bildschirm(titel, zeilen) {
+      g.fillStyle = "rgba(0,0,0,0.65)";
+      g.fillRect(0, 0, B, H);
+      g.fillStyle = "#ffd84a";
+      g.font = "bold 44px Trebuchet MS, sans-serif";
+      g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText(titel, B / 2, H / 2 - 70);
+      g.fillStyle = "#fff";
+      g.font = "22px Trebuchet MS, sans-serif";
+      zeilen.forEach((z, i) => g.fillText(z, B / 2, H / 2 - 10 + i * 34));
+    }
+
+    function schleife() {
+      if (zustand === "spielen") {
+        aktualisieren();
+        zeichnen();
+      } else if (zustand === "start") {
+        zeichneBoden();
+        bildschirm("Mob-Kampf", [
+          "🧟 Zombies laufen auf dich zu",
+          "💣 Creeper zischen und explodieren",
+          "💀 Skelette schießen Pfeile",
+          "👁️ Endermen teleportieren sich",
+          "Enter drücken oder tippen zum Starten"
+        ]);
+      } else {
+        zeichnen();
+        bildschirm("Besiegt!", [
+          "Du hast Welle " + welle + " geschafft",
+          "⭐ " + punkte + " Punkte",
+          "",
+          "Enter drücken oder tippen für ein neues Spiel"
+        ]);
+      }
+      requestAnimationFrame(schleife);
+    }
+
+    schleife();
+  </script>
+</body>
+</html>

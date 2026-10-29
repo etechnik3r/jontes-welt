@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mob-Quiz</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { --hintergrund-oben: #1b3a5c; --hintergrund-unten: #0a1626; }
+    .frage { font-size: 1.7rem; text-align: center; margin: 10px 0 20px; font-weight: bold; }
+    .antworten { display: grid; gap: 14px; }
+    .antworten .knopf, .stufen .knopf { width: 100%; margin: 0; font-size: 1.5rem; padding: 18px; }
+    .stufen { display: grid; gap: 16px; max-width: 420px; margin: 20px auto; }
+    .richtig { background: #2e7d32 !important; }
+    .falsch { background: #c62828 !important; }
+    .stand { text-align: center; font-size: 1.1rem; margin-bottom: 8px; }
+    .ergebnis { text-align: center; font-size: 1.6rem; }
+    .versteckt { display: none; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="index.html">Start</a>
+    <a href="zombie.html">Zombies</a>
+    <a href="creeper.html">Creeper</a>
+    <a href="skelett.html">Skelette</a>
+    <a href="enderman.html">Endermen</a>
+    <a href="quiz.html" class="aktiv">Quiz</a>
+    <a href="spiel.html">Spiel</a>
+  </nav>
+  <div class="boden"></div>
+
+  <main>
+    <h1>Mob-Quiz</h1>
+
+    <div id="auswahl" class="kasten">
+      <p class="frage">Wie schwer soll es sein?</p>
+      <div class="stufen">
+        <button class="knopf" style="--knopf:#2e7d32" onclick="starte('einfach')">🟢 Einfach</button>
+        <button class="knopf" style="--knopf:#ef6c00" onclick="starte('mittel')">🟠 Mittel</button>
+        <button class="knopf" style="--knopf:#b71c1c" onclick="starte('schwer')">🔴 Schwer</button>
+      </div>
+    </div>
+
+    <div id="spielfeld" class="kasten versteckt">
+      <p class="stand" id="stand"></p>
+      <p class="frage" id="frage"></p>
+      <div class="antworten" id="antworten"></div>
+    </div>
+
+    <div id="ende" class="kasten versteckt">
+      <p class="ergebnis" id="ergebnis"></p>
+      <button class="knopf" onclick="zurAuswahl()">Nochmal spielen</button>
+    </div>
+  </main>
+
+  <footer>Gebaut von Jonte mit Hilfe von Papa und Claude. Minecraft gehört Mojang, das hier ist eine Fan-Seite.</footer>
+
+  <script>
+    // Jede Frage: [Frage, richtige Antwort, falsche Antwort, falsche Antwort]
+    const fragen = {
+      einfach: [
+        ["Was lässt ein Zombie fallen?", "Fleisch", "Diamanten", "Kuchen"],
+        ["Was macht ein Creeper?", "Er explodiert", "Er fliegt", "Er singt"],
+        ["Was hat ein Skelett in der Hand?", "Einen Bogen", "Eine Angel", "Eine Fackel"],
+        ["Welche Farbe hat ein Creeper?", "Grün", "Rot", "Blau"],
+        ["Wann kommen Zombies?", "In der Nacht", "Am Mittag", "Nie"],
+        ["Was passiert Zombies in der Sonne?", "Sie brennen", "Sie schlafen", "Sie tanzen"],
+        ["Was kann ein Enderman?", "Teleportieren", "Schwimmen", "Fliegen"],
+        ["Welche Farbe haben Enderman-Augen?", "Lila", "Grün", "Gelb"]
+      ],
+      mittel: [
+        ["Was lässt ein Creeper fallen?", "Schwarzpulver", "Knochen", "Perlen"],
+        ["Was lässt ein Skelett fallen?", "Knochen", "Fleisch", "Federn"],
+        ["Wovor hat ein Creeper Angst?", "Vor Katzen", "Vor Hühnern", "Vor Kühen"],
+        ["Wovor hat ein Skelett Angst?", "Vor Wölfen", "Vor Schafen", "Vor Bienen"],
+        ["Was mag ein Enderman nicht?", "Wasser", "Gras", "Sand"],
+        ["Was lässt ein Enderman fallen?", "Eine Enderperle", "Ein Ei", "Einen Apfel"],
+        ["Was hilft gegen Pfeile?", "Ein Schild", "Eine Angel", "Ein Eimer"],
+        ["Was trägt ein Enderman manchmal?", "Einen Block", "Eine Katze", "Ein Boot"]
+      ],
+      schwer: [
+        ["Ein Blitz trifft einen Creeper. Was passiert?", "Er wird geladen", "Er wird klein", "Nichts"],
+        ["Ein Zombie bleibt lange unter Wasser. Was wird aus ihm?", "Ein Ertrunkener", "Ein Skelett", "Ein Fisch"],
+        ["Was machen die Pfeile vom Eiswanderer?", "Sie machen langsam", "Sie machen Feuer", "Sie heilen"],
+        ["Wann lässt ein Creeper eine Schallplatte fallen?", "Wenn ein Skelett ihn besiegt", "Wenn es regnet", "Wenn es Nacht ist"],
+        ["Was schützt dich vorm Enderman-Blick?", "Ein Kürbis auf dem Kopf", "Ein Goldhelm", "Eine Brille"],
+        ["Enderperle und Lohenstaub ergeben ...?", "Ein Enderauge", "Eine Fackel", "Ein Bett"],
+        ["Was macht man aus Knochen?", "Knochenmehl", "Brot", "Glas"],
+        ["Warum trifft ein Pfeil keinen Enderman?", "Er teleportiert sich weg", "Er ist zu klein", "Er ist unsichtbar"]
+      ]
+    };
+
+    let liste = [], nummer = 0, punkte = 0, gesperrt = false;
+
+    function mischen(a) {
+      const b = a.slice();
+      for (let i = b.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [b[i], b[j]] = [b[j], b[i]];
+      }
+      return b;
+    }
+
+    function zeige(id) {
+      ["auswahl", "spielfeld", "ende"].forEach(x =>
+        document.getElementById(x).classList.toggle("versteckt", x !== id));
+    }
+
+    function starte(stufe) {
+      liste = mischen(fragen[stufe]);
+      nummer = 0; punkte = 0;
+      zeige("spielfeld");
+      neueFrage();
+    }
+
+    function neueFrage() {
+      gesperrt = false;
+      const [frage, richtig, ...falsch] = liste[nummer];
+      document.getElementById("stand").textContent =
+        "Frage " + (nummer + 1) + " von " + liste.length + "   ⭐ " + punkte;
+      document.getElementById("frage").textContent = frage;
+      const box = document.getElementById("antworten");
+      box.innerHTML = "";
+      mischen([richtig, ...falsch]).forEach(text => {
+        const b = document.createElement("button");
+        b.className = "knopf";
+        b.style.setProperty("--knopf", "#455a64");
+        b.textContent = text;
+        b.onclick = () => antworte(b, text === richtig, richtig);
+        box.appendChild(b);
+      });
+    }
+
+    function antworte(knopf, istRichtig, richtig) {
+      if (gesperrt) return;
+      gesperrt = true;
+      if (istRichtig) {
+        punkte++;
+        knopf.classList.add("richtig");
+      } else {
+        knopf.classList.add("falsch");
+        document.querySelectorAll("#antworten .knopf").forEach(b => {
+          if (b.textContent === richtig) b.classList.add("richtig");
+        });
+      }
+      setTimeout(() => {
+        nummer++;
+        if (nummer < liste.length) neueFrage(); else fertig();
+      }, 1300);
+    }
+
+    function fertig() {
+      let text = "Du hast " + punkte + " von " + liste.length + " Punkten! ";
+      if (punkte === liste.length) text += "🏆 Alles richtig, du bist ein Mob-Profi!";
+      else if (punkte >= liste.length / 2) text += "👍 Super gemacht!";
+      else text += "💪 Probier es nochmal!";
+      document.getElementById("ergebnis").textContent = text;
+      zeige("ende");
+    }
+
+    function zurAuswahl() { zeige("auswahl"); }
+  </script>
+</body>
+</html>
